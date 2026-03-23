@@ -40,16 +40,34 @@ function IncomeFlow({ snapshot }) {
   const taxes = snapshot.annualTaxes
   const totalExpenses = snapshot.expenses.reduce((s, e) => s + e.annualAmount, 0)
   const totalMortgages = snapshot.mortgages.reduce((s, m) => s + m.annualAmount, 0)
-  const netSavings = gross - taxes - totalExpenses - totalMortgages
+  const totalDebts = (snapshot.debts ?? []).reduce((s, d) => s + d.annualAmount, 0)
+  const coinvestInflows = snapshot.coinvestInflows ?? []
+  const totalCoinvestInflows = coinvestInflows.reduce((s, c) => s + c.amount, 0)
+
+  // Co-invest distributions are windfall inflows — add to effective income for net calc
+  const effectiveIncome = gross + totalCoinvestInflows
+  const netSavings = effectiveIncome - taxes - totalExpenses - totalMortgages - totalDebts
+  const maxVal = Math.max(effectiveIncome, 1)
 
   return (
     <div className="space-y-2">
-      <FlowRow label="Gross Income" value={gross} maxVal={gross} color="#22c55e" bold />
+      <FlowRow label="Gross Income" value={gross} maxVal={maxVal} color="#22c55e" bold />
+
+      {coinvestInflows.map((c) => (
+        <FlowRow
+          key={c.id}
+          label={c.name}
+          value={c.amount}
+          maxVal={maxVal}
+          color="#06b6d4"
+          indent
+        />
+      ))}
 
       <FlowRow
         label={`Income Tax (${((taxes / gross) * 100).toFixed(0)}%)`}
         value={-taxes}
-        maxVal={gross}
+        maxVal={maxVal}
         color="#ef4444"
         indent
       />
@@ -59,7 +77,7 @@ function IncomeFlow({ snapshot }) {
           key={e.name}
           label={e.name}
           value={-e.annualAmount}
-          maxVal={gross}
+          maxVal={maxVal}
           color="#f97316"
           indent
         />
@@ -70,8 +88,19 @@ function IncomeFlow({ snapshot }) {
           key={m.id}
           label={`${m.name} mortgage`}
           value={-m.annualAmount}
-          maxVal={gross}
+          maxVal={maxVal}
           color="#f59e0b"
+          indent
+        />
+      ))}
+
+      {(snapshot.debts ?? []).map((d) => (
+        <FlowRow
+          key={d.id}
+          label={`${d.name} (debt)`}
+          value={-d.annualAmount}
+          maxVal={maxVal}
+          color="#a855f7"
           indent
         />
       ))}
@@ -80,7 +109,7 @@ function IncomeFlow({ snapshot }) {
         <FlowRow
           label="Net Savings"
           value={netSavings}
-          maxVal={gross}
+          maxVal={maxVal}
           color={netSavings >= 0 ? '#6366f1' : '#ef4444'}
           bold
         />
@@ -89,8 +118,8 @@ function IncomeFlow({ snapshot }) {
       {/* Summary numbers */}
       <div className="grid grid-cols-3 gap-2 pt-3 mt-1">
         {[
-          { label: 'Gross', value: gross, color: 'text-positive' },
-          { label: 'Expenses + Tax', value: taxes + totalExpenses + totalMortgages, color: 'text-negative' },
+          { label: totalCoinvestInflows > 0 ? 'Income + Co-invest' : 'Gross', value: effectiveIncome, color: 'text-positive' },
+          { label: 'Expenses + Tax', value: taxes + totalExpenses + totalMortgages + totalDebts, color: 'text-negative' },
           { label: 'Net Savings', value: netSavings, color: netSavings >= 0 ? 'text-accent' : 'text-negative' },
         ].map(({ label, value, color }) => (
           <div key={label} className="bg-white/5 rounded-lg px-3 py-2 text-center">
@@ -135,7 +164,15 @@ function AssetDonut({ snapshot, categories }) {
       color: PROPERTY_COLORS[i % PROPERTY_COLORS.length],
     }))
 
-  const data = [...bucketSlices, ...propertySlices]
+  const coinvestSlices = (snapshot.coinvests ?? [])
+    .filter((c) => c.value > 0)
+    .map((c, i) => ({
+      name: `${c.name} (co-invest)`,
+      value: Math.round(c.value),
+      color: ['#06b6d4', '#0ea5e9', '#38bdf8', '#7dd3fc'][i % 4],
+    }))
+
+  const data = [...bucketSlices, ...propertySlices, ...coinvestSlices]
   const total = data.reduce((s, d) => s + d.value, 0)
 
   if (data.length === 0) {
@@ -182,7 +219,7 @@ function AssetDonut({ snapshot, categories }) {
           </div>
         ))}
         <div className="border-t border-border pt-1.5 flex items-center justify-between">
-          <span className="text-xs text-muted font-semibold">Total Net Worth</span>
+          <span className="text-xs text-muted font-semibold">Total Portfolio</span>
           <span className="text-xs text-white font-bold">{formatCurrency(total)}</span>
         </div>
       </div>

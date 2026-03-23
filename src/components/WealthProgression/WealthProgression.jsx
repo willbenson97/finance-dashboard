@@ -40,11 +40,11 @@ function projectWealth({ assets, categories, monthlySavings, years }) {
   const dataPoints = []
 
   for (let m = 0; m <= months; m++) {
-    // Sample every quarter
-    if (m % 3 === 0) {
+    // Sample at integer year boundaries only
+    if (m % 12 === 0) {
       const total = Object.values(balances).reduce((s, v) => s + v, 0)
       const point = {
-        year: parseFloat((m / 12).toFixed(2)),
+        year: m / 12,
         total: Math.round(total),
         contributions: Math.round(Math.max(totalContributions, 0)),
         growth: Math.round(Math.max(total - totalContributions, 0)),
@@ -233,6 +233,7 @@ export default function WealthProgression() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2e3254" />
                   <XAxis dataKey="year" stroke="#8b8fa8" tick={{ fontSize: 11 }}
+                    ticks={Array.from({ length: horizon + 1 }, (_, i) => i)}
                     label={{ value: 'Years', position: 'insideBottom', offset: -2, fill: '#8b8fa8', fontSize: 11 }} />
                   <YAxis stroke="#8b8fa8" tick={{ fontSize: 11 }} tickFormatter={formatY} width={60} />
                   <Tooltip content={<ChartTooltip />} />
@@ -275,6 +276,7 @@ export default function WealthProgression() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2e3254" />
                   <XAxis dataKey="year" stroke="#8b8fa8" tick={{ fontSize: 11 }}
+                    ticks={Array.from({ length: horizon + 1 }, (_, i) => i)}
                     label={{ value: 'Years', position: 'insideBottom', offset: -2, fill: '#8b8fa8', fontSize: 11 }} />
                   <YAxis stroke="#8b8fa8" tick={{ fontSize: 11 }} tickFormatter={formatY} width={60} />
                   <Tooltip content={<ChartTooltip />} />
@@ -311,7 +313,7 @@ export default function WealthProgression() {
                         {formatCurrency(amount)}
                       </p>
                       <p className="text-xs text-muted mt-0.5">
-                        Year {year} · ~{Math.round(new Date().getFullYear() + year)}
+                        Year {year} · ~{new Date().getFullYear() + year}
                       </p>
                       {isTarget && (
                         <p className="text-xs text-positive mt-0.5">FI Target</p>

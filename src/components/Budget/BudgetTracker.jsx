@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useBudget, calcNetSavings } from '../../hooks/useBudget'
 import { useFISettings } from '../../hooks/useFISettings'
+import { useDebts } from '../../hooks/useDebts'
 import { formatCurrency } from '../../lib/format'
 import PageHeader from '../Layout/PageHeader'
 import { INCOME_PRESETS, EXPENSE_PRESETS } from '../../lib/presets'
@@ -221,12 +222,14 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
 export default function BudgetTracker() {
   const { items, loading: budgetLoading, addItem, updateItem, deleteItem, totals } = useBudget()
   const { settings, loading: settingsLoading, saveSettings } = useFISettings()
+  const { debts, loading: debtsLoading } = useDebts()
   const [taxRate, setTaxRate] = useState(null)
   const [savingTax, setSavingTax] = useState(false)
 
   const effectiveTaxRate = taxRate ?? settings.effective_tax_rate ?? 25
   const monthlyTax = (totals.annualIncome * (effectiveTaxRate / 100)) / 12
-  const netSavings = calcNetSavings(totals, effectiveTaxRate)
+  const totalDebtPayments = debts.reduce((s, d) => s + (d.monthly_payment ?? 0), 0)
+  const netSavings = calcNetSavings(totals, effectiveTaxRate) - totalDebtPayments
 
   const byType = {
     income:  items.filter((i) => i.type === 'income'),
@@ -241,18 +244,20 @@ export default function BudgetTracker() {
     setSavingTax(false)
   }
 
-  if (budgetLoading || settingsLoading) return <div className="text-muted animate-pulse">Loading…</div>
+  if (budgetLoading || settingsLoading || debtsLoading)
+    return <div className="text-muted animate-pulse">Loading…</div>
 
   return (
     <div>
-      <PageHeader title="Budget" subtitle="Annual income, taxes, and monthly expenses — drives your savings rate" />
+      <PageHeader title="Budget" subtitle="Annual income, taxes, expenses, and debt payments — drives your savings rate" />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
         {[
-          { label: 'Gross Income',  value: totals.monthlyIncome, sub: `${formatCurrency(totals.annualIncome)}/yr`, color: 'text-white' },
+          { label: 'Gross Income',    value: totals.monthlyIncome,  sub: `${formatCurrency(totals.annualIncome)}/yr`, color: 'text-white' },
           { label: `Taxes (${effectiveTaxRate}%)`, value: monthlyTax, color: 'text-negative' },
-          { label: 'Expenses',      value: totals.expenses, color: 'text-negative' },
-          { label: 'Net Savings',   value: netSavings, color: netSavings >= 0 ? 'text-positive' : 'text-negative' },
+          { label: 'Expenses',        value: totals.expenses,       color: 'text-negative' },
+          { label: 'Debt Payments',   value: totalDebtPayments,     color: totalDebtPayments > 0 ? 'text-negative' : 'text-muted' },
+          { label: 'Net Savings',     value: netSavings,            color: netSavings >= 0 ? 'text-positive' : 'text-negative' },
         ].map(({ label, value, sub, color }) => (
           <div key={label} className="bg-card border border-border rounded-2xl p-5">
             <p className="text-xs text-muted">{label}</p>
@@ -303,6 +308,34 @@ export default function BudgetTracker() {
       <div className="space-y-4">
         <BudgetSection type="income"  items={byType.income}  onAdd={addItem} onUpdate={updateItem} onDelete={deleteItem} />
         <BudgetSection type="expense" items={byType.expense} onAdd={addItem} onUpdate={updateItem} onDelete={deleteItem} />
+
+        {/* Debt payments — read-only, managed on Net Worth page */}
+        {debts.length > 0 && (
+          <div className="bg-card border border-border rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <span className="text-sm font-semibold text-white">Debt Payments</span>
+                <span className="ml-3 text-sm font-bold text-negative">{formatCurrency(totalDebtPayments)}/mo</span>
+              </div>
+              <span className="text-xs text-muted">Manage debts on the Net Worth page</span>
+            </div>
+            <div className="divide-y divide-border/50">
+              {debts.map((d) => (
+                <div key={d.id} className="flex items-center gap-3 px-5 py-3">
+                  <span className="flex-1 text-sm text-white">{d.name}</span>
+                  <div className="text-right">
+                    <span className="text-sm font-medium text-white">
+                      {formatCurrency(d.monthly_payment)}<span className="text-muted font-normal">/mo</span>
+                    </span>
+                    <p className="text-xs text-muted">
+                      {formatCurrency(d.current_balance)} balance · {d.interest_rate}% APR
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

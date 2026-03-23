@@ -2,15 +2,16 @@ import { useState, useMemo } from 'react'
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts'
+import { Link } from 'react-router-dom'
 import { useFISettings } from '../../hooks/useFISettings'
 import { useAssets } from '../../hooks/useAssets'
 import { useCategories } from '../../hooks/useCategories'
 import { useBudget } from '../../hooks/useBudget'
+import { useDebts } from '../../hooks/useDebts'
 import { formatCurrency } from '../../lib/format'
 import { buildProjection } from '../../lib/projection'
 import PageHeader from '../Layout/PageHeader'
 import SavingsAllocationPanel from './SavingsAllocationPanel'
-import PropertyPurchasesPanel from './PropertyPurchasesPanel'
 import ProjectionSnapshot from './ProjectionSnapshot'
 
 // ─── Subcomponents ────────────────────────────────────────────────────────────
@@ -148,6 +149,7 @@ export default function FIPlanner() {
   const { assets, loading: assetsLoading } = useAssets()
   const { categories, loading: catsLoading } = useCategories()
   const { items: budgetItems, totals, loading: budgetLoading } = useBudget()
+  const { debts, loading: debtsLoading } = useDebts()
   const [local, setLocal] = useState(null)
   const [saved, setSaved] = useState(false)
 
@@ -177,17 +179,9 @@ export default function FIPlanner() {
       }
     })
 
-  // ── Property purchases state ──────────────────────────────────────────────
-  const propertyPurchases = vals.property_purchases ?? []
-  const setPropertyPurchases = (fn) =>
-    setLocal((prev) => {
-      const base = prev ?? settings
-      return {
-        ...base,
-        property_purchases:
-          typeof fn === 'function' ? fn(base.property_purchases ?? []) : fn,
-      }
-    })
+  // Property purchases + co-invests are managed on their own pages — read directly from settings
+  const propertyPurchases = settings.property_purchases ?? []
+  const coinvests = settings.coinvests ?? []
 
   // ── Derived values ────────────────────────────────────────────────────────
   const initialBuckets = useMemo(() => {
@@ -213,11 +207,13 @@ export default function FIPlanner() {
     [budgetItems]
   )
 
+  const totalMonthlyDebt = debts.reduce((s, d) => s + (d.monthly_payment ?? 0), 0)
+
   // Flat monthly savings (for display)
   const monthlySavings = useMemo(() => {
-    const net = (annualIncome / 12) * (1 - effectiveTaxRate / 100) - totals.expenses
+    const net = (annualIncome / 12) * (1 - effectiveTaxRate / 100) - totals.expenses - totalMonthlyDebt
     return net
-  }, [annualIncome, effectiveTaxRate, totals.expenses])
+  }, [annualIncome, effectiveTaxRate, totals.expenses, totalMonthlyDebt])
 
   const currentNetWorth = useMemo(
     () => assets.reduce((s, a) => s + (a.value ?? 0), 0),
@@ -238,7 +234,8 @@ export default function FIPlanner() {
     growthRate > 0 ||
     salaryJumps.length > 0 ||
     expenseItems.some((e) => e.inflationRate > 0) ||
-    propertyPurchases.length > 0
+    propertyPurchases.length > 0 ||
+    coinvests.length > 0
 
   // ── Projection (with all enhancements) ───────────────────────────────────
   const { points, yearsToFI, snapshots } = useMemo(() => {
@@ -252,9 +249,11 @@ export default function FIPlanner() {
       initialBuckets,
       savingsAllocation,
       propertyPurchases,
+      currentDebts: debts,
+      coinvests,
       targetNumber: vals.target_number,
     })
-  }, [annualIncome, effectiveTaxRate, growthRate, salaryJumps, expenseItems, initialBuckets, savingsAllocation, propertyPurchases, vals.target_number])
+  }, [annualIncome, effectiveTaxRate, growthRate, salaryJumps, expenseItems, initialBuckets, savingsAllocation, propertyPurchases, debts, coinvests, vals.target_number])
 
   // ── Baseline (no enhancements) ────────────────────────────────────────────
   const { points: baselinePoints, yearsToFI: baselineYearsToFI } = useMemo(() => {
@@ -268,6 +267,8 @@ export default function FIPlanner() {
       initialBuckets,
       savingsAllocation: [],
       propertyPurchases: [],
+      currentDebts: debts,
+      coinvests: [],
       targetNumber: vals.target_number,
     })
   }, [annualIncome, effectiveTaxRate, expenseItems, initialBuckets, vals.target_number, hasEnhancements])
@@ -294,7 +295,7 @@ export default function FIPlanner() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  if (settingsLoading || assetsLoading || catsLoading || budgetLoading)
+  if (settingsLoading || assetsLoading || catsLoading || budgetLoading || debtsLoading)
     return <div className="text-muted animate-pulse">Loading…</div>
 
   const yearsSaved =
@@ -407,25 +408,41 @@ export default function FIPlanner() {
         />
       </div>
 
-      {/* Row 3: Savings Allocation + Property Purchases */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
-        <div className="lg:col-span-2">
-          <SavingsAllocationPanel
-            categories={categories}
-            allocation={savingsAllocation}
-            onChange={setSavingsAllocation}
-            initialBuckets={initialBuckets}
-          />
-        </div>
-        <div className="lg:col-span-3">
-          <PropertyPurchasesPanel
-            properties={propertyPurchases}
-            onChange={setPropertyPurchases}
-          />
-        </div>
+      {/* Row 3: Savings Allocation */}
+      <div className="mb-6">
+        <SavingsAllocationPanel
+          categories={categories}
+          allocation={savingsAllocation}
+          onChange={setSavingsAllocation}
+          initialBuckets={initialBuckets}
+        />
       </div>
 
-      {/* Row 4: Projection Chart + Snapshot */}
+      {/* Row 4: Links to dedicated pages */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        {[
+          { to: '/property-purchases', label: 'Property Purchases', count: propertyPurchases.length, icon: '🏠', desc: 'future buys modeled in projection' },
+          { to: '/co-investments',     label: 'Co-Investments',     count: coinvests.length,          icon: '🤝', desc: 'fund distributions & future vehicles' },
+        ].map(({ to, label, count, icon, desc }) => (
+          <Link
+            key={to}
+            to={to}
+            className="bg-card border border-border rounded-2xl p-5 flex items-center gap-4 hover:border-accent/50 transition-colors group"
+          >
+            <span className="text-2xl">{icon}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white group-hover:text-accent transition-colors">{label}</p>
+              <p className="text-xs text-muted mt-0.5">{desc}</p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className="text-lg font-bold text-white">{count}</p>
+              <p className="text-xs text-muted">{count === 1 ? 'item' : 'items'}</p>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Row 5: Projection Chart + Snapshot */}
       <div className="bg-card border border-border rounded-2xl p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-white">Portfolio Projection</h3>
@@ -459,6 +476,7 @@ export default function FIPlanner() {
               <CartesianGrid strokeDasharray="3 3" stroke="#2e3254" />
               <XAxis
                 dataKey="year" stroke="#8b8fa8" tick={{ fontSize: 11 }}
+                ticks={Array.from({ length: Math.ceil(yearsToFI ?? 0) + 1 }, (_, i) => i)}
                 label={{ value: 'Years', position: 'insideBottom', offset: -2, fill: '#8b8fa8', fontSize: 11 }}
               />
               <YAxis
@@ -488,7 +506,7 @@ export default function FIPlanner() {
         )}
       </div>
 
-      {/* Row 5: Year-by-Year Snapshot */}
+      {/* Row 6: Year-by-Year Snapshot */}
       {snapshots.length > 0 && (
         <div className="mt-6">
           <ProjectionSnapshot snapshots={snapshots} categories={categories} />

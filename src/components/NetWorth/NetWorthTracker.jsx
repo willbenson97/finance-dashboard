@@ -2,19 +2,30 @@ import { useState } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { useAssets } from '../../hooks/useAssets'
 import { useCategories } from '../../hooks/useCategories'
+import { useDebts } from '../../hooks/useDebts'
+import { useFISettings } from '../../hooks/useFISettings'
 import { formatCurrency } from '../../lib/format'
 import PageHeader from '../Layout/PageHeader'
 import AssetForm from './AssetForm'
 import CategoryManager from './CategoryManager'
+import DebtSection from './DebtSection'
 
 export default function NetWorthTracker() {
   const { assets, loading: assetsLoading, addAsset, updateAsset, deleteAsset } = useAssets()
   const { categories, loading: catsLoading, addCategory, updateCategory, deleteCategory } = useCategories()
+  const { debts, loading: debtsLoading, addDebt, updateDebt, deleteDebt } = useDebts()
+  const { settings, loading: settingsLoading } = useFISettings()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
   const catMap = Object.fromEntries(categories.map((c) => [c.id, c]))
-  const totalNetWorth = assets.reduce((s, a) => s + (a.value ?? 0), 0)
+  const coinvests = (settings.coinvests ?? []).filter((c) => c.type === 'current' && (c.currentMark ?? 0) > 0)
+  const coinvestTotal = coinvests.reduce((s, c) => s + (c.currentMark ?? 0), 0)
+  const totalAssets = assets.reduce((s, a) => s + (a.value ?? 0), 0) + coinvestTotal
+  const totalLiabilities = debts.reduce((s, d) => s + (d.current_balance ?? 0), 0)
+  const totalNetWorth = totalAssets - totalLiabilities
+
+  const propertyPurchases = settings.property_purchases ?? []
 
   // Pie data grouped by category
   const pieData = Object.values(
@@ -26,6 +37,10 @@ export default function NetWorthTracker() {
       return acc
     }, {})
   )
+  // Append co-invest slice if any
+  if (coinvestTotal > 0) {
+    pieData.push({ name: 'Co-Investments', value: coinvestTotal, color: '#06b6d4' })
+  }
 
   // Assets grouped by category for the list
   const grouped = assets.reduce((acc, a) => {
@@ -44,24 +59,37 @@ export default function NetWorthTracker() {
     setEditing(null)
   }
 
-  if (assetsLoading || catsLoading) return <div className="text-muted animate-pulse">Loading…</div>
+  if (assetsLoading || catsLoading || debtsLoading || settingsLoading)
+    return <div className="text-muted animate-pulse">Loading…</div>
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Net Worth" subtitle="All assets combined into one total" />
+      <PageHeader title="Net Worth" subtitle="Assets minus liabilities" />
 
-      {/* Total card */}
-      <div className="bg-card border border-border rounded-2xl p-6 flex items-center justify-between">
-        <div>
-          <p className="text-muted text-sm">Total Net Worth</p>
-          <p className="text-4xl font-bold text-white mt-1">{formatCurrency(totalNetWorth)}</p>
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-card border border-border rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <p className="text-muted text-xs">Total Assets{coinvestTotal > 0 ? ' (incl. co-invests)' : ''}</p>
+            <p className="text-2xl font-bold text-positive mt-1">{formatCurrency(totalAssets)}</p>
+          </div>
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-accent hover:bg-accent-hover text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
+          >
+            + Add
+          </button>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-accent hover:bg-accent-hover text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          + Add Asset
-        </button>
+        <div className="bg-card border border-border rounded-2xl p-5">
+          <p className="text-muted text-xs">Total Liabilities</p>
+          <p className="text-2xl font-bold text-negative mt-1">{formatCurrency(totalLiabilities)}</p>
+        </div>
+        <div className="bg-card border border-border rounded-2xl p-5">
+          <p className="text-muted text-xs">Net Worth</p>
+          <p className={`text-2xl font-bold mt-1 ${totalNetWorth >= 0 ? 'text-white' : 'text-negative'}`}>
+            {formatCurrency(totalNetWorth)}
+          </p>
+        </div>
       </div>
 
       {/* Add asset form */}
@@ -163,9 +191,36 @@ export default function NetWorthTracker() {
                 })}
               </div>
             )}
+
+            {/* Co-investments section */}
+            {coinvests.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                  <span className="text-xs font-semibold text-muted uppercase tracking-wider">Co-Investments</span>
+                </div>
+                <div className="space-y-1.5">
+                  {coinvests.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between px-3 py-2.5 bg-surface rounded-xl">
+                      <p className="text-sm text-white">{c.name}</p>
+                      <span className="text-sm font-semibold text-cyan-400">{formatCurrency(c.currentMark)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* Liabilities */}
+      <DebtSection
+        debts={debts}
+        onAdd={addDebt}
+        onUpdate={updateDebt}
+        onDelete={deleteDebt}
+        propertyPurchases={propertyPurchases}
+      />
 
       {/* Category manager */}
       <CategoryManager
