@@ -17,6 +17,7 @@ function AddItemForm({ type, onSubmit, onCancel }) {
   const [preset, setPreset] = useState('')
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
+  const [inflationRate, setInflationRate] = useState('3')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
@@ -28,7 +29,9 @@ function AddItemForm({ type, onSubmit, onCancel }) {
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return setErr('Enter a valid amount.')
     setSaving(true)
     try {
-      await onSubmit({ type, name: resolvedName.trim(), amount: Number(amount) })
+      const item = { type, name: resolvedName.trim(), amount: Number(amount) }
+      if (type === 'expense') item.inflation_rate = Number(inflationRate)
+      await onSubmit(item)
       onCancel()
     } catch (e) {
       setErr(e.message)
@@ -63,19 +66,36 @@ function AddItemForm({ type, onSubmit, onCancel }) {
           />
         </div>
       )}
-      <div>
-        <label className="block text-xs text-muted mb-1">
-          {isAnnual(type) ? 'Annual amount ($)' : 'Monthly amount ($)'}
-        </label>
-        <input
-          type="number" min="0" step="0.01"
-          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent"
-          placeholder="0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-        {isAnnual(type) && amount && !isNaN(Number(amount)) && (
-          <p className="text-xs text-muted mt-1">= {formatCurrency(Number(amount) / 12)}/mo</p>
+      <div className={`grid gap-3 ${type === 'expense' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div>
+          <label className="block text-xs text-muted mb-1">
+            {isAnnual(type) ? 'Annual amount ($)' : 'Monthly amount ($)'}
+          </label>
+          <input
+            type="number" min="0" step="0.01"
+            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent"
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          {isAnnual(type) && amount && !isNaN(Number(amount)) && (
+            <p className="text-xs text-muted mt-1">= {formatCurrency(Number(amount) / 12)}/mo</p>
+          )}
+        </div>
+        {type === 'expense' && (
+          <div>
+            <label className="block text-xs text-muted mb-1">Inflation rate</label>
+            <div className="relative">
+              <input
+                type="number" min="0" step="0.5"
+                className="w-full bg-card border border-border rounded-lg px-3 pr-7 py-2 text-sm text-white focus:outline-none focus:border-accent"
+                value={inflationRate}
+                onChange={(e) => setInflationRate(e.target.value)}
+              />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">%</span>
+            </div>
+            <p className="text-xs text-muted mt-1">used in FI projection</p>
+          </div>
         )}
       </div>
       <div className="flex gap-2">
@@ -97,12 +117,23 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editAmount, setEditAmount] = useState('')
+  const [editInflation, setEditInflation] = useState('3')
 
   const rawTotal = items.reduce((s, i) => s + i.amount, 0)
   const displayTotal = isAnnual(type) ? rawTotal / 12 : rawTotal
 
-  const startEdit = (item) => { setEditingId(item.id); setEditAmount(String(item.amount)) }
-  const saveEdit  = async (item) => { await onUpdate(item.id, { amount: Number(editAmount) }); setEditingId(null) }
+  const startEdit = (item) => {
+    setEditingId(item.id)
+    setEditAmount(String(item.amount))
+    setEditInflation(String(item.inflation_rate ?? 3))
+  }
+
+  const saveEdit = async (item) => {
+    const updates = { amount: Number(editAmount) }
+    if (type === 'expense') updates.inflation_rate = Number(editInflation)
+    await onUpdate(item.id, updates)
+    setEditingId(null)
+  }
 
   return (
     <div className="bg-card border border-border rounded-2xl overflow-hidden">
@@ -128,7 +159,7 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
             <span className="flex-1 text-sm text-white">{item.name}</span>
             {editingId === item.id ? (
               <div className="flex items-center gap-2">
-                <div className="flex flex-col items-end gap-0.5">
+                <div className="flex flex-col items-end gap-1">
                   <div className="relative">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">$</span>
                     <input
@@ -140,6 +171,17 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
                   </div>
                   {isAnnual(type) && editAmount && !isNaN(Number(editAmount)) && (
                     <span className="text-xs text-muted">{formatCurrency(Number(editAmount) / 12)}/mo</span>
+                  )}
+                  {type === 'expense' && (
+                    <div className="relative">
+                      <input
+                        type="number" step="0.5" min="0"
+                        value={editInflation}
+                        onChange={(e) => setEditInflation(e.target.value)}
+                        className="w-24 bg-surface border border-border rounded-lg pl-3 pr-7 py-1 text-xs text-white focus:outline-none focus:border-accent"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted text-xs">%/yr</span>
+                    </div>
                   )}
                 </div>
                 <button onClick={() => saveEdit(item)} className="text-xs text-accent hover:text-white">Save</button>
@@ -153,6 +195,9 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
                     <span className="text-muted font-normal">{isAnnual(type) ? '/yr' : '/mo'}</span>
                   </span>
                   {isAnnual(type) && <p className="text-xs text-muted">{formatCurrency(item.amount / 12)}/mo</p>}
+                  {type === 'expense' && (
+                    <p className="text-xs text-muted">{item.inflation_rate ?? 3}% inflation</p>
+                  )}
                 </div>
                 <div className="hidden group-hover:flex gap-2">
                   <button onClick={() => startEdit(item)} className="text-xs text-muted hover:text-accent">Edit</button>
@@ -176,7 +221,7 @@ function BudgetSection({ type, items, onAdd, onUpdate, onDelete }) {
 export default function BudgetTracker() {
   const { items, loading: budgetLoading, addItem, updateItem, deleteItem, totals } = useBudget()
   const { settings, loading: settingsLoading, saveSettings } = useFISettings()
-  const [taxRate, setTaxRate] = useState(null) // local override until saved
+  const [taxRate, setTaxRate] = useState(null)
   const [savingTax, setSavingTax] = useState(false)
 
   const effectiveTaxRate = taxRate ?? settings.effective_tax_rate ?? 25
@@ -202,7 +247,6 @@ export default function BudgetTracker() {
     <div>
       <PageHeader title="Budget" subtitle="Annual income, taxes, and monthly expenses — drives your savings rate" />
 
-      {/* Summary bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
           { label: 'Gross Income',  value: totals.monthlyIncome, sub: `${formatCurrency(totals.annualIncome)}/yr`, color: 'text-white' },
@@ -220,7 +264,6 @@ export default function BudgetTracker() {
         ))}
       </div>
 
-      {/* Savings rate + tax rate input */}
       <div className="bg-card border border-border rounded-2xl px-5 py-4 mb-6 flex flex-wrap items-center gap-6">
         <div>
           {totals.monthlyIncome > 0 ? (
